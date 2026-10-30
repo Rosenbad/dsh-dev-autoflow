@@ -1,0 +1,80 @@
+{
+  "name": "dsh-dev-autoflow",
+  "version": "1.1.0",
+  "description": "开发任务自动流编排插件：需求重构 → 规格硬校验 → 通道路由 → 执行验证 → 案例沉淀。含可视化执行窗口（流水线状态面板）。",
+  "type": "module",
+  "main": "index.js",
+  "types": "index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "default": "./index.js"
+    },
+    "./client": "./client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "index.d.ts",
+    "client.js",
+    "src",
+    "scripts",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "node build.mjs",
+    "prepack": "node build.mjs",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "pretest": "node build.mjs",
+    "test": "node --test --experimental-strip-types test/*.test.mjs",
+    "diagnose": "node --experimental-strip-types scripts/diagnostics-run.mjs",
+    "verify": "node scripts/verify-plugin.mjs .",
+    "check": "npm run typecheck && npm test && npm run verify"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@deepseek-ai/dsh-tools": "^0.2.0-rc.2",
+    "@types/node": "^22.0.0",
+    "@types/react": "~18.3.1",
+    "esbuild": "^0.25.0",
+    "react": "^18.2.0",
+    "typescript": "^5.9.0",
+    "yaml": "^2.5.0"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-tools": ">=0.2.0-rc.2 <0.3.0-0"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-connection",
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-slots",
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-ui-conversation"
+      ],
+      "platform": "web"
+    }
+  },
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "dev-autoflow",
+    "workflow",
+    "orchestrator",
+    "skill"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.0.0",
+    "dsh": ">=0.1.0-rc.6"
+  }
+}
