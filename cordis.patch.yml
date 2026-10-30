@@ -1,0 +1,192 @@
+# dsh-dev-autoflow bundle patch — mounts the plugin into the profile roster
+# and declares the "自动流" agent preset (mode) in the mode picker.
+#
+# The host half (exports ".") registers agent tools (autoflow_spec_check /
+# autoflow_route / autoflow_append_case) plus a same-origin JSON API
+# (/api/autoflow/status|progress|cases) on the DSH webServer; the browser half
+# (exports "./client", declared by dsh.client) renders the step-visualization
+# window that polls the progress endpoint.
+#
+# Install (persistent):  dsh plugin --profile web add .   (from this checkout;
+# `dsh plugin` reconciles dsh.profile.bundles automatically for dsh.bundle
+# packages).  Dev overlay:  dsh web --patch ./cordis.dev.yml
+- insert:
+    - id: dsh-dev-autoflow
+      name: dsh-dev-autoflow
+      config:
+        specScript: ./scripts/spec_check.py
+        # caseFile 省略 → 默认写入用户数据目录（~/.dsh/autoflow/cases.md，
+        # 可用 DSH_AUTOFLOW_HOME 覆盖），不再落在插件包目录里，升级不丢数据。
+
+    # ── "自动流" agent preset（模式下拉菜单入口）────────────────────────────
+    # 声明式 preset：选定该模式后，直接在聊天框对话描述开发需求，agent 按
+    # 需求重构 → 规格硬校验 → 通道路由 → 执行验证 → 案例沉淀 的流水线推进，
+    # 每步调用 autoflow_* 工具落进度，窗口实时展示当前步骤。
+    #
+    # 与论文伴读（complete: true 屏蔽默认工具）不同：自动流要真正执行开发
+    # 任务，所以 persona 用 prefix 追加编排规则（保留默认身份与运行时上下文），
+    # 并显式声明开发工具面（终端/文件/任务/web/skill/委派）。
+    - id: preset-dev-autoflow
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: dev-autoflow
+        name: 自动流
+        description: 开发任务自动流编排：需求 → 规格 → 校验 → 路由 → 交付。选定后直接在聊天框描述开发需求（例如"帮我做个员工考勤看板"），agent 会把需求重构为结构化规格、硬校验完整性、按内容路由到最省成本且质量最高的执行通道，再按验收标准交付并沉淀案例。
+        order: 25
+        plugins:
+          - id: persona
+            name: '@deepseek-ai/dsh-persona'
+            config:
+              prefix: |
+                ## 定位
+                你是「自动流」模式的开发任务编排器。你不是又一个写代码的 agent，而是"需求 → 规格 → 路由 → 验证"的编排器。你回答三个问题：**做什么**（规格）、**谁来做**（路由）、**做到什么程度算完**（验收）。
+
+                ## 流水线（任何开发类任务都走这条闭环，除非任务已精确到无需拆解）
+                Phase 1 需求重构 → Phase 2 分发路由 → Phase 3 执行与验证 → 案例沉淀
+
+                ## Phase 1：需求重构
+                1. 把用户的原始需求重构成结构化规格，字段：目标 / 受众 / 交付形态 / 核心功能 / 范围边界 / 技术约束 / 验收标准 / 成本预算 / 待确认项。
+                2. 关键信息缺失且会实质改变方案（受众、交付形态、技术栈、范围边界、验收标准）时，**一次问清，不超过 3 问**；能合理假设的低影响项直接采用默认并写入待确认项。
+                3. 规格定稿后调用 autoflow_spec_check 硬校验；未通过就补齐字段再校验。规格未通过禁止开工。
+                   - 返回 ok=false：按 problems 逐条补齐，重新校验。
+                   - 返回 ok=true 但 degraded=true：说明确定性校验器不可用，只能算"软通过"，必须在交付说明里写明这一点。
+
+                ## Phase 2：分发路由
+                按"规模 × 复杂度"选通道（可调用 autoflow_route 辅助判定）：
+                - 单文件/单页面/一次性计算，无需跨模块协作 → **直接执行**（零委派开销，最省成本）
+                - 命中已有 skill 的能力（表格/文档/PPT/网页/图像/视频等）→ **加载对应 skill**（复用成熟流程）
+                - 多文件工程、多通道研究、独立流水线 ≥8 单元、资源密集（N≥10万/B≥2GB）、多场景对比 → **委派 subagent**（并行拆分）
+                - 需求模糊或依赖实时外部信息 → **先探查再定稿**，不基于错误前提开发
+
+                **成本铁律**：能直接做的不委派；能用一个 skill 的不开多通道；能一次问清的不多轮往返。
+
+                ## Phase 3：执行与验证
+                1. 开工前调用 autoflow_report_step({ key: 'execute', status: 'active', note: '…' }) 让窗口显示真实进展。
+                2. 按规格执行，逐条对照验收标准（规格中已定义"怎样算完成"）。执行用你的常规工具：终端（bash/pwsh）、文件系统、web 搜索/抓取、todo 任务跟踪。
+                3. 交付前自查：验收标准逐条核对、产物回读（运行测试/构建/真实入口）、数值复核、范围未越界。
+                4. 交付后调用 autoflow_report_step 上报 execute 的真实结果（done/fail + 一句话说明）。**只报你实际做过的事**，不要预设完成。
+                5. 交付说明写明：验证方式、覆盖范围、已知缺口。
+                6. 用户提出偏差 → 回到 Phase 1 更新规格，重跑受影响环节，不原地打补丁绕过规格。
+
+                ## 案例沉淀（每完成一个任务必做）
+                任务交付后调用 autoflow_append_case 工具，把这次任务沉淀进案例库（摘要/执行通道/交付形态/结果/教训），供后续任务复用经验。
+
+                ## 工具
+                - autoflow_spec_check：把当前规格文本做硬校验（必填字段非空、验收可测、范围含"不做"），返回 PASS/FAIL 与问题清单；校验器不可用时返回 degraded（软通过）。规格定稿前调用。
+                - autoflow_route：按交付形态与规模给出执行通道建议（direct / skill / organize）。
+                - autoflow_report_step：上报某一步的真实进展（尤其 execute），让窗口显示你实际在做的事。
+                - autoflow_append_case：任务完成后沉淀案例到经验库，同时收尾本轮进度。
+                - 开发执行本身用常规工具：终端、文件系统、web、todo、skill、subagent 委派。
+
+                ## 行为约束
+                - 规格未定稿不开工；验收标准未定义不算完成。
+                - 回复精简，每阶段只输出关键结论，不做冗余总结。
+                - 用户在聊天框里直接说需求即可，不需要额外操作。
+
+          # ── 开发工具面（与 redteam preset 同源，裁剪为开发必需）──────────
+
+          - id: tool-bash
+            name: '@deepseek-ai/dsh-tool-bash'
+            disabled: !!js process.platform === 'win32'
+
+          - id: tool-pwsh
+            name: '@deepseek-ai/dsh-tool-pwsh'
+            disabled: !!js process.platform !== 'win32'
+
+          - id: tool-fs
+            name: '@deepseek-ai/dsh-tool-fs'
+
+          - id: tool-fs-search
+            name: '@deepseek-ai/dsh-tool-fs-search'
+            config:
+              sampleOverCapGlobResults: false
+
+          - id: tool-jobs
+            name: '@deepseek-ai/dsh-tool-jobs'
+
+          - id: skill-filesystem
+            name: '@deepseek-ai/dsh-skill-filesystem'
+
+          - id: tool-skill
+            name: '@deepseek-ai/dsh-tool-skill'
+
+          - id: tool-todo
+            name: '@deepseek-ai/dsh-tool-todo'
+            config:
+              allowParallelInProgress: true
+
+          - id: tool-web
+            name: '@deepseek-ai/dsh-tool-web'
+            config:
+              fetch: true
+              searchTimeoutMs: 60000
+
+          - id: tool-ask-user
+            name: '@deepseek-ai/dsh-tool-ask-user'
+
+          # ── 委派（OrganizeAgent 并行拆分）───────────────────────────────
+          - id: delegation
+            name: cordis:group
+            group: true
+            isolate:
+              workflowEngine: true
+            config:
+              - id: tool-subagent-control
+                name: '@deepseek-ai/dsh-tool-subagent-control'
+                disabled: false
+
+              - id: tool-subagent-list-agents
+                name: '@deepseek-ai/dsh-tool-subagent-control/list-agents'
+                disabled: false
+
+              - id: tool-subagent
+                name: '@deepseek-ai/dsh-tool-subagent'
+                disabled: false
+                config:
+                  provider: spawn
+                  toolName: subagent
+                  modelSelectionSettings: true
+                  backgroundMode: continuable
+
+              - id: tool-subagent-fork
+                name: '@deepseek-ai/dsh-tool-subagent'
+                disabled: false
+                config:
+                  provider: fork
+                  toolName: subagent_fork
+                  backgroundMode: continuable
+
+              - id: workflow-ptc
+                name: '@deepseek-ai/dsh-workflow-ptc'
+                config:
+                  provider: spawn
+
+              - id: tool-workflow
+                name: '@deepseek-ai/dsh-tool-workflow'
+
+              - id: tool-ralph
+                name: '@deepseek-ai/dsh-tool-ralph'
+                config:
+                  subagentProvider: spawn
+                  maxRounds: 64
+
+          # ── 长会话压缩 ──────────────────────────────────────────────────
+          - id: compaction
+            name: cordis:group
+            group: true
+            isolate:
+              compaction: true
+              toolResultPruner: true
+            config:
+              - id: compaction-basic
+                name: '@deepseek-ai/dsh-compaction-basic'
+
+              - id: command-compact
+                name: '@deepseek-ai/dsh-command-compact'
+
+              - id: tool-result-pruner
+                name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+                config:
+                  thresholdChars: 8192
+                  headChars: 4096
+                  tailChars: 1024
